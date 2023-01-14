@@ -132,7 +132,7 @@ def grad(pred_map, target):
     with torch.enable_grad():
         diff = pred_map - target
         d = diff.detach().requires_grad_()
-        ((torch.linalg.vector_norm(d))**2).backwards()
+        ((torch.linalg.vector_norm(d))**2).backward()
 
     return d.grad
 
