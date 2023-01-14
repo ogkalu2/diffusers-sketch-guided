@@ -670,6 +670,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
         # 8. Denoising loop
+        blocks = [0,1,2,3]
         LGP = latent_guidance_predictor(output_dim=4, input_dim=7080, num_encodings=9).to(device)
         checkpoint = torch.load(LGP_path, map_location=device)
         LGP.load_state_dict(checkpoint['model_state_dict'])
