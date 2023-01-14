@@ -735,7 +735,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
                 
-                if count > 2:
+                if count >= 2:
                     gradient = grad(pred_edge_map, initial_pred)
                     alpha = (torch.linalg.vector_norm(latent_model_input[:1] - latents))/(torch.linalg.vector_norm(gradient))
                     alpha = alpha * edge_guidance_scale                
