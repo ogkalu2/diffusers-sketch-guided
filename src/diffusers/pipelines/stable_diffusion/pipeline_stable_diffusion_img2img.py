@@ -674,7 +674,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         latents = self.prepare_latents(
             image, latent_timestep, batch_size, num_images_per_prompt, text_embeddings.dtype, device, generator
         )
-        target_latent = img_to_latents(target_rgb)
+        target_latent = self.img_to_latents(target_rgb)
 
         # 7. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
