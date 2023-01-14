@@ -17,13 +17,15 @@ from typing import Callable, List, Optional, Union
 
 import numpy as np
 import torch
+import math
 
 import PIL
+from PIL import Image, ImageFilter
 from packaging import version
 from transformers import CLIPFeatureExtractor, CLIPTextModel, CLIPTokenizer
 
 from ...configuration_utils import FrozenDict
-from ...models import AutoencoderKL, UNet2DConditionModel
+from ...models import AutoencoderKL, Unet2DConditionModel
 from ...schedulers import (
     DDIMScheduler,
     DPMSolverMultistepScheduler,
@@ -96,6 +98,81 @@ def preprocess(image):
         image = torch.cat(image, dim=0)
     return image
 
+def save_tensors(module: nn.Module, features, name: str):
+    """ Process and save activations in the module. """
+    if type(features) in [list, tuple]:
+        features = [f.detach().float() for f in features if f is not None and isinstance(f, torch.Tensor)] 
+        setattr(module, name, features)
+    elif isinstance(features, dict):
+        features = {k: f.detach().float() for k, f in features.items()}
+        setattr(module, name, features)
+    else:
+        setattr(module, name, features.detach().float())
+
+def save_out_hook(self, inp, out):
+    save_tensors(self, out, 'activations')
+    return out
+    
+def resize_and_concatenate(activations: List[torch.Tensor], reference):
+    assert all([isinstance(acts, torch.Tensor) for acts in activations])
+    size = reference.shape[2:]
+    resized_activations = []
+    for acts in activations:
+        acts = nn.functional.interpolate(
+            acts, size=size, mode="bilinear"
+        )
+        acts = acts[:1]
+        acts = acts.transpose(1,3)
+        resized_activations.append(acts)
+    
+    return torch.cat(resized_activations, dim=1)
+
+def grad(pred_map, target):
+    with torch.enable_grad():
+        diff = pred_map - target
+        d = diff.detach().requires_grad_()
+        ((torch.linalg.vector_norm(d))**2).backwards()
+
+    return d.grad
+
+@torch.no_grad()
+def img_to_latents(img:Image):
+  np_img = (np.array(img).astype(np.float32) / 255.0) * 2.0 - 1.0
+  np_img = np_img[None].transpose(0, 3, 1, 2)
+  torch_img = torch.from_numpy(np_img)
+  generator = torch.Generator(device).manual_seed(0)
+  latents = vae.encode(torch_img.to(vae.dtype).to(device)).latent_dist.sample(generator=generator)
+  return latents
+
+class latent_guidance_predictor(nn.Module):
+    def __init__(self, output_dim, input_dim, num_encodings):
+        super(latent_guidance_predictor, self).__init__()
+        self.num_encodings = num_encodings
+        
+        self.layers = nn.Sequential(
+            nn.Linear(input_dim, 512),
+            nn.ReLU(),
+            nn.BatchNorm1d(num_features=512),
+            nn.Linear(512, 256),         
+            nn.ReLU(),
+            nn.BatchNorm1d(num_features=256),
+            nn.Linear(256, 128),     
+            nn.ReLU(),
+            nn.BatchNorm1d(num_features=128),
+            nn.Linear(128, 64),      
+            nn.ReLU(),
+            nn.BatchNorm1d(num_features=64),
+            nn.Linear(64, output_dim)
+        )
+
+    def forward(self, x, t):
+        # Concatenate input pixels with noise level t and positional encodings
+        pos_encoding = [torch.sin(2 * math.pi * t * (2 **-l)) for l in range(self.num_encodings)]
+        pos_encoding = torch.cat(pos_encoding, dim=-1)
+        x = torch.cat((x, t, pos_encoding), dim=-1)
+        x = x.flatten(start_dim=0, end_dim=2)
+        
+        return self.layers(x)
 
 class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
     r"""
@@ -489,6 +566,8 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         prompt: Union[str, List[str]],
         image: Union[torch.FloatTensor, PIL.Image.Image] = None,
         strength: float = 0.8,
+        LGP_path: str,
+        edge_guidance_scale: float = 1.6,
         num_inference_steps: Optional[int] = 50,
         guidance_scale: Optional[float] = 7.5,
         negative_prompt: Optional[Union[str, List[str]]] = None,
@@ -579,6 +658,9 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
 
         # 4. Preprocess image
         image = preprocess(image)
+        target = image.convert("L")
+        target = target.filter(ImageFilter.FIND_EDGES)
+        target_rgb = Image.merge('RGB', (target, target, target))
 
         # 5. set timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -589,28 +671,64 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         latents = self.prepare_latents(
             image, latent_timestep, batch_size, num_images_per_prompt, text_embeddings.dtype, device, generator
         )
+        target_latent = img_to_latents(target_rgb)
 
         # 7. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
         # 8. Denoising loop
+        LGP = latent_guidance_predictor(output_dim=4, input_dim=7080, num_encodings=9).to(device)
+        checkpoint = torch.load(LGP_path, map_location=device)
+        LGP.load_state_dict(checkpoint['model_state_dict'])
+        LGP.eval()
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+                
+                activations = []
+                save_hook = save_out_hook
+                feature_blocks = []
+                for idx, block in enumerate(self.unet.down_blocks):
+                    if idx in blocks:
+                        block.register_forward_hook(save_hook)
+                        feature_blocks.append(block) 
+            
+                for idx, block in enumerate(self.unet.up_blocks):
+                    if idx in blocks:
+                        block.register_forward_hook(save_hook)
+                        feature_blocks.append(block)  
 
                 # predict the noise residual
                 noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
+                noise_lvl = noise_pred[:1].transpose(1,3)
 
                 # perform guidance
                 if do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    
+                for block in feature_blocks:
+                    activations.append(block.activations)
+                    block.activations = None
+         
+                activations = [activations[0][0], activations[1][0], activations[2][0], activations[3][0], activations[4], activations[5], activations[6], activations[7]]
+                features = resize_and_concatenate(activations, latents)
+                
+                pred_edge_map = LGP(features, noise_lvl)
+                pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64))
+                pred_edge_map = pred_edge_map.transpose(3, 1)
+                gradient = grad(pred_edge_map, target_latent)
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
+                
+                alpha = (torch.linalg.vector_norm(latent_model_input[:1] - latents))/(torch.linalg.vector_norm(gradient))
+                alpha = alpha * edge_guidance_scale
+                
+                latents = latents - alpha * gradient
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
