@@ -138,6 +138,7 @@ def grad(pred_map, target):
 
 @torch.no_grad()
 def img_to_latents(img:Image):
+  device = "cuda" if torch.cuda.is_available() else "cpu"
   np_img = (np.array(img).astype(np.float32) / 255.0) * 2.0 - 1.0
   np_img = np_img[None].transpose(0, 3, 1, 2)
   torch_img = torch.from_numpy(np_img)
