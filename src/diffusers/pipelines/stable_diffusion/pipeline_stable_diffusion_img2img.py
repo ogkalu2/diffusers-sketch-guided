@@ -655,6 +655,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         
         image = preprocess(image)
         target_latent = preprocess(target_rgb)
+        print(target_latent.shape)
 
         # 5. set timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
