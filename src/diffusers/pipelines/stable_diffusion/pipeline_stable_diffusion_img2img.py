@@ -126,7 +126,7 @@ def resize_and_concatenate(activations: List[torch.Tensor], reference):
         acts = acts.transpose(1,3)
         resized_activations.append(acts)
     
-    return torch.cat(resized_activations, dim=1)
+    return torch.cat(resized_activations, dim=3)
 
 def grad(pred_map, target):
     with torch.enable_grad():
