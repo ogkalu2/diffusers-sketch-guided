@@ -25,7 +25,7 @@ from packaging import version
 from transformers import CLIPFeatureExtractor, CLIPTextModel, CLIPTokenizer
 
 from ...configuration_utils import FrozenDict
-from ...models import AutoencoderKL, Unet2DConditionModel
+from ...models import AutoencoderKL, UNet2DConditionModel
 from ...schedulers import (
     DDIMScheduler,
     DPMSolverMultistepScheduler,
