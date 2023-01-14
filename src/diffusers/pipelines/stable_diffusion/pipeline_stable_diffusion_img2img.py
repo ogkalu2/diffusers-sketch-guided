@@ -658,10 +658,11 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         )
 
         # 4. Preprocess image
-        image = preprocess(image)
         target = image.convert("L")
         target = target.filter(ImageFilter.FIND_EDGES)
         target_rgb = Image.merge('RGB', (target, target, target))
+        
+        image = preprocess(image)
 
         # 5. set timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
