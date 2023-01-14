@@ -136,16 +136,6 @@ def grad(pred_map, target):
 
     return d.grad
 
-@torch.no_grad()
-def img_to_latents(img:Image):
-  device = "cuda" if torch.cuda.is_available() else "cpu"
-  np_img = (np.array(img).astype(np.float32) / 255.0) * 2.0 - 1.0
-  np_img = np_img[None].transpose(0, 3, 1, 2)
-  torch_img = torch.from_numpy(np_img)
-  generator = torch.Generator(device).manual_seed(0)
-  latents = vae.encode(torch_img.to(vae.dtype).to(device)).latent_dist.sample(generator=generator)
-  return latents
-
 class latent_guidance_predictor(nn.Module):
     def __init__(self, output_dim, input_dim, num_encodings):
         super(latent_guidance_predictor, self).__init__()
@@ -466,6 +456,16 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         # we always cast to float32 as this does not cause significant overhead and is compatible with bfloa16
         image = image.cpu().permute(0, 2, 3, 1).float().numpy()
         return image
+    
+    
+    def img_to_latents(img:Image):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        np_img = (np.array(img).astype(np.float32) / 255.0) * 2.0 - 1.0
+        np_img = np_img[None].transpose(0, 3, 1, 2)
+        torch_img = torch.from_numpy(np_img)
+        generator = torch.Generator(device).manual_seed(0)
+        latents = self.vae.encode(torch_img.to(self.vae.dtype).to(device)).latent_dist.sample(generator=generator)
+        return latents
 
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.prepare_extra_step_kwargs
     def prepare_extra_step_kwargs(self, generator, eta):
