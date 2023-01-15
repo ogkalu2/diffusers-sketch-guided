@@ -722,10 +722,10 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                     activations.append(block.activations)
                     block.activations = None
          
-                activations = [activations[0][0], activations[1][0], activations[2][0], activations[3][0], activations[4], activations[5], activations[6], activations[7]]
-                features = resize_and_concatenate(activations, latents)                
+                activations = [activations[0][0], activations[1][0], activations[2][0], activations[3][0], activations[4], activations[5], activations[6], activations[7]]                
                 
                 with torch.enable_grad():
+                    features = resize_and_concatenate(activations, latents)
                     pred_edge_map = LGP(features, noise_lvl)
                     pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64)).transpose(3, 1)
                     
