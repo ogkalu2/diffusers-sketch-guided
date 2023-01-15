@@ -157,12 +157,12 @@ class latent_guidance_predictor(nn.Module):
             nn.Linear(64, output_dim)
         )
 
-    def forward(self, x, t):
+    def forward(self, x, t, xt):
         # Concatenate input pixels with noise level t and positional encodings
-        t = t.transpose(1,3)
+        xt = xt.transpose(1,3)
         pos_encoding = [torch.sin(2 * math.pi * t * (2 **-l)) for l in range(self.num_encodings)]
         pos_encoding = torch.cat(pos_encoding, dim=-1)
-        x = torch.cat((x, t, pos_encoding), dim=-1)
+        x = torch.cat((xt, x, t, pos_encoding), dim=-1)
         x = x.flatten(start_dim=0, end_dim=2)
         
         return self.layers(x)
@@ -684,7 +684,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         initial_pred_set = False
         count = 0
         blocks = [0,1,2,3]
-        LGP = latent_guidance_predictor(output_dim=4, input_dim=7080, num_encodings=9).to(device)
+        LGP = latent_guidance_predictor(output_dim=4, input_dim=7084, num_encodings=9).to(device)
         checkpoint = torch.load(LGP_path, map_location=device)
         LGP.load_state_dict(checkpoint['model_state_dict'])
         LGP.eval()
@@ -726,9 +726,10 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                 activations = [activations[0][0], activations[1][0], activations[2][0], activations[3][0], activations[4], activations[5], activations[6], activations[7]]                
                 
                 with torch.enable_grad():
-                    noise_lvl = noise_pred_t[:1].detach().requires_grad_(requires_grad=True)
+                    latents = latents.detach().requires_grad_(requires_grad=True)
+                    noise_lvl = noise_pred_t[:1].transpose(1,3)
                     features = resize_and_concatenate(activations, latents)
-                    pred_edge_map = LGP(features, noise_lvl)
+                    pred_edge_map = LGP(features, noise_lvl, latents)
                     pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64)).transpose(3, 1)
                     
                     if not initial_pred_set:
@@ -738,7 +739,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                     if count >=2:
                         diff = pred_edge_map - initial_pred
                         sim = (torch.linalg.vector_norm(diff))**2
-                        gradient = torch.autograd.grad(sim, noise_lvl)[0]
+                        gradient = torch.autograd.grad(sim, latents)[0]
                 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
