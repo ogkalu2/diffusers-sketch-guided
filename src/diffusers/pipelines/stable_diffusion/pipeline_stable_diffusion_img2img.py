@@ -709,9 +709,10 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                         block.register_forward_hook(save_hook)
                         feature_blocks.append(block)  
 
-                # predict the noise residual                            
-                noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
-                noise_lvl = noise_pred[:1].transpose(1,3)
+                # predict the noise residual
+                with torch.enable_grad():
+                    noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
+                    noise_lvl = noise_pred[:1].transpose(1,3)
 
                 # perform guidance
                 if do_classifier_free_guidance:
