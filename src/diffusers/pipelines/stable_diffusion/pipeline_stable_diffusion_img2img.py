@@ -159,6 +159,7 @@ class latent_guidance_predictor(nn.Module):
 
     def forward(self, x, t):
         # Concatenate input pixels with noise level t and positional encodings
+        t = t.transpose(1,3)
         pos_encoding = [torch.sin(2 * math.pi * t * (2 **-l)) for l in range(self.num_encodings)]
         pos_encoding = torch.cat(pos_encoding, dim=-1)
         x = torch.cat((x, t, pos_encoding), dim=-1)
@@ -725,7 +726,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                 activations = [activations[0][0], activations[1][0], activations[2][0], activations[3][0], activations[4], activations[5], activations[6], activations[7]]                
                 
                 with torch.enable_grad():
-                    noise_lvl = noise_pred_t[:1].transpose(1,3).detach().requires_grad_(requires_grad=True)
+                    noise_lvl = noise_pred_t[:1].detach().requires_grad_(requires_grad=True)
                     features = resize_and_concatenate(activations, latents)
                     pred_edge_map = LGP(features, noise_lvl)
                     pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64)).transpose(3, 1)
@@ -738,7 +739,6 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                         diff = pred_edge_map - initial_pred
                         sim = (torch.linalg.vector_norm(diff))**2
                         gradient = torch.autograd.grad(sim, noise_lvl)[0]
-                        noise_lvl = noise_lvl.transpose(3,1)
                 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
