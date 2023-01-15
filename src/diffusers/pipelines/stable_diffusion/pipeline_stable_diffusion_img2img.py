@@ -692,9 +692,9 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
             for i, t in enumerate(timesteps):
                 count+=1
                 # expand the latents if we are doing classifier free guidance                
-                latents = latents.detach().requires_grad_(requires_grad=True)
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+                latent_model_input = latent_model_input.detach().requires_grad_(requires_grad=True)
                 
                 activations = []
                 save_hook = save_out_hook
@@ -736,7 +736,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                     if count >=2:
                         diff = pred_edge_map - initial_pred
                         sim = (torch.linalg.vector_norm(diff))**2
-                        gradient = torch.autograd.grad(sim, latents)[0]                     
+                        gradient = torch.autograd.grad(sim, latent_model_input)[0]                     
                 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
