@@ -737,7 +737,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                     if count >=2:
                         diff = pred_edge_map - initial_pred
                         sim = (torch.linalg.vector_norm(diff))**2
-                        gradient = torch.autograd.grad(sim, noise_lvl + torch.randn(noise_lvl.shape))[0]                     
+                        gradient = torch.autograd.grad(sim, noise_lvl + torch.randn(noise_lvl.shape).to("cuda")[0]                     
                 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
