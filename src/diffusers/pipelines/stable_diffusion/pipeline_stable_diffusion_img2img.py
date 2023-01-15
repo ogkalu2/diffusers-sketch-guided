@@ -692,7 +692,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
             for i, t in enumerate(timesteps):
                 count+=1
                 # expand the latents if we are doing classifier free guidance                
-                #latents = latents.detach().requires_grad_(requires_grad=True)
+                latents = latents.detach().requires_grad_(requires_grad=True)
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
                 
@@ -723,8 +723,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                     block.activations = None
          
                 activations = [activations[0][0], activations[1][0], activations[2][0], activations[3][0], activations[4], activations[5], activations[6], activations[7]]
-                features = resize_and_concatenate(activations, latents)
-                features = features.detach().requires_grad_(requires_grad=True)
+                features = resize_and_concatenate(activations, latents)                
                 
                 with torch.enable_grad():
                     pred_edge_map = LGP(features, noise_lvl)
