@@ -692,40 +692,40 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
             for i, t in enumerate(timesteps):
                 count+=1
                 # expand the latents if we are doing classifier free guidance
-                latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
-                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
-                
-                activations = []
-                save_hook = save_out_hook
-                feature_blocks = []
-                for idx, block in enumerate(self.unet.down_blocks):
-                    if idx in blocks:
-                        block.register_forward_hook(save_hook)
-                        feature_blocks.append(block) 
-            
-                for idx, block in enumerate(self.unet.up_blocks):
-                    if idx in blocks:
-                        block.register_forward_hook(save_hook)
-                        feature_blocks.append(block)  
-
-                # predict the noise residual
-                noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
-                noise_lvl = noise_pred[:1].transpose(1,3)
-
-                # perform guidance
-                if do_classifier_free_guidance:
-                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
-                    
-                for block in feature_blocks:
-                    activations.append(block.activations)
-                    block.activations = None
-         
-                activations = [activations[0][0], activations[1][0], activations[2][0], activations[3][0], activations[4], activations[5], activations[6], activations[7]]
-                features = resize_and_concatenate(activations, latents)
-                
                 with torch.enable_grad():
-                    features = features.detach().requires_grad_()
+                    latents = latents.detach().requires_grad_(requires_grad=True)
+                    latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
+                    latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+                
+                    activations = []
+                    save_hook = save_out_hook
+                    feature_blocks = []
+                    for idx, block in enumerate(self.unet.down_blocks):
+                        if idx in blocks:
+                            block.register_forward_hook(save_hook)
+                            feature_blocks.append(block) 
+            
+                    for idx, block in enumerate(self.unet.up_blocks):
+                        if idx in blocks:
+                            block.register_forward_hook(save_hook)
+                            feature_blocks.append(block)  
+
+                    # predict the noise residual                            
+                    noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
+                    noise_lvl = noise_pred[:1].transpose(1,3)
+
+                    # perform guidance
+                    if do_classifier_free_guidance:
+                        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    
+                    for block in feature_blocks:
+                        activations.append(block.activations)
+                        block.activations = None
+         
+                    activations = [activations[0][0], activations[1][0], activations[2][0], activations[3][0], activations[4], activations[5], activations[6], activations[7]]
+                    features = resize_and_concatenate(activations, latents)
+               
                     pred_edge_map = LGP(features, noise_lvl)
                     pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64)).transpose(3, 1)
                     
@@ -736,7 +736,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                     if count >=2:
                         diff = pred_edge_map - initial_pred
                         sim = (torch.linalg.vector_norm(diff))**2
-                        gradient = torch.autograd.grad(sim, features)[0] 
+                        gradient = torch.autograd.grad(sim, latent_model_input)[0]                     
                 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
