@@ -727,7 +727,6 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                 activations = [activations[0][0], activations[1][0], activations[2][0], activations[3][0], activations[4], activations[5], activations[6], activations[7]]                
                 
                 with torch.enable_grad():
-                    latents = latents.detach().requires_grad_(requires_grad=True)
                     noise_lvl = noise_pred_t[:1].transpose(1,3)
                     features = resize_and_concatenate(activations, latents)
                     pred_edge_map = LGP(features, noise_lvl, latents)
@@ -739,7 +738,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                         
                     if count >=2:
                         sim = criterion(pred_edge_map, initial_pred)
-                        gradient = torch.autograd.grad(sim, latents)[0]
+                        gradient = torch.autograd.grad(sim, initial_pred)[0]
                 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
