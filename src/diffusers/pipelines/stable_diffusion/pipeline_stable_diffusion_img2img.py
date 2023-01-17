@@ -665,7 +665,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         target_rgb = Image.merge('RGB', (target, target, target))
         
         image = preprocess(image)
-        target_latent = self.img_to_latents(target_rgb)
+        target_latent = self.img_to_latents(target_rgb).transpose(1,3).flatten(start_dim=0, end_dim=2)
 
         # 5. set timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -681,6 +681,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
         # 8. Denoising loop
+        criterion = nn.MSELoss()
         initial_pred_set = False
         count = 0
         blocks = [0,1,2,3]
@@ -730,15 +731,14 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                     noise_lvl = noise_pred_t[:1].transpose(1,3)
                     features = resize_and_concatenate(activations, latents)
                     pred_edge_map = LGP(features, noise_lvl, latents)
-                    pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64)).transpose(3, 1)
+                    #pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64)).transpose(3, 1)
                     
                     if not initial_pred_set:
                         initial_pred = pred_edge_map
                         initial_pred_set = True
                         
                     if count >=2:
-                        diff = pred_edge_map - initial_pred
-                        sim = (torch.linalg.vector_norm(diff))**2
+                        sim = criterion(pred_edge_map, initial_pred)
                         gradient = torch.autograd.grad(sim, latents)[0]
                 
                 # compute the previous noisy sample x_t -> x_t-1
