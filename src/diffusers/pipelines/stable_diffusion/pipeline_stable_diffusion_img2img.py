@@ -532,10 +532,10 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
     def __call__(
         self,
         prompt: Union[str, List[str]],
-        height: Optional[int] = None,
-        width: Optional[int] = None,
         LGP_path: str,
         edge_guidance_scale: float,
+        height: Optional[int] = None,
+        width: Optional[int] = None,
         image: Union[torch.FloatTensor, PIL.Image.Image] = None,
         num_inference_steps: Optional[int] = 50,
         guidance_scale: Optional[float] = 7.5,
