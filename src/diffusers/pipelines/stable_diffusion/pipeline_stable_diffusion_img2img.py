@@ -665,7 +665,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         target_rgb = Image.merge('RGB', (target, target, target))
         
         image = preprocess(image)
-        target_latent = self.img_to_latents(target_rgb).transpose(1,3).flatten(start_dim=0, end_dim=2)
+        target_latent = self.img_to_latents(target_rgb)
 
         # 5. set timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -682,8 +682,6 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
 
         # 8. Denoising loop
         criterion = nn.MSELoss()
-        initial_pred_set = False
-        count = 0
         blocks = [0,1,2,3]
         LGP = latent_guidance_predictor(output_dim=4, input_dim=7084, num_encodings=9).to(device)
         checkpoint = torch.load(LGP_path, map_location=device)
@@ -692,7 +690,6 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
-                count+=1
                 # expand the latents if we are doing classifier free guidance                
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
@@ -727,26 +724,21 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                 activations = [activations[0][0], activations[1][0], activations[2][0], activations[3][0], activations[4], activations[5], activations[6], activations[7]]                
                 
                 with torch.enable_grad():
+                    target_latent = target_latent.detach().requires_grad_(requires_grad=True)
                     noise_lvl = noise_pred_t[:1].transpose(1,3)
                     features = resize_and_concatenate(activations, latents)
                     pred_edge_map = LGP(features, noise_lvl, latents)
-                    pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64)).transpose(3, 1)
-                    
-                    if not initial_pred_set:
-                        initial_pred = pred_edge_map
-                        initial_pred_set = True
-                        
-                    if count >=2:
-                        sim = criterion(pred_edge_map, initial_pred)
-                        gradient = torch.autograd.grad(sim, initial_pred)[0]                      
+                    pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64)).transpose(3, 1)              
+             
+                    sim = criterion(pred_edge_map, target_latent)
+                    gradient = torch.autograd.grad(sim, target_latent)[0]                      
                 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
                 
-                if count >= 2:
-                    alpha = (torch.linalg.vector_norm(latent_model_input[:1] - latents))/(torch.linalg.vector_norm(gradient))
-                    alpha = alpha * edge_guidance_scale                
-                    latents = latents - alpha * gradient
+                alpha = (torch.sqrt(criterion(latent_model_input[:1], latents)))/(torch.linalg.vector_norm(gradient))
+                alpha = alpha * edge_guidance_scale                
+                latents = latents - alpha * gradient
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
