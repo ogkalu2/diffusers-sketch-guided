@@ -159,7 +159,7 @@ class latent_guidance_predictor(nn.Module):
 
     def forward(self, x, t):
         # Concatenate input pixels with noise level t and positional encodings
-        t = torch.transpose(1,3)
+        t = t.transpose(1,3)
         pos_encoding = [torch.sin(2 * math.pi * t * (2 **-l)) for l in range(self.num_encodings)]
         pos_encoding = torch.cat(pos_encoding, dim=-1)
         x = torch.cat((xt, x, t, pos_encoding), dim=-1)
