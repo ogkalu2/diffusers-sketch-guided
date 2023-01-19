@@ -723,7 +723,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                 activations = [activations[0][0], activations[1][0], activations[2][0], activations[3][0], activations[4], activations[5], activations[6], activations[7]]                
                 
                 with torch.enable_grad():
-                    target_latent = target_latent.detach().requires_grad_(requires_grad=True)
+                    #target_latent = target_latent.detach().requires_grad_(requires_grad=True)
                     latents = latents.detach().requires_grad_(requires_grad=True)
                     noise_lvl = noise_pred_t[:1].transpose(1,3)
                     features = resize_and_concatenate(activations, latents)
@@ -734,11 +734,11 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                     gradient = torch.autograd.grad(sim, latents)[0]                      
                 
                 # compute the previous noisy sample x_t -> x_t-1
-                latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
+                latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample - gradient
                 
-                alpha = (torch.linalg.vector_norm(latent_model_input[:1] - latents))/(torch.linalg.vector_norm(gradient))
-                alpha = alpha * edge_guidance_scale                
-                latents = latents - alpha * gradient
+                #alpha = (torch.linalg.vector_norm(latent_model_input[:1] - latents))/(torch.linalg.vector_norm(gradient))
+                #alpha = alpha * edge_guidance_scale                
+                #latents = latents - alpha * gradient
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
