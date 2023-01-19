@@ -157,9 +157,9 @@ class latent_guidance_predictor(nn.Module):
             nn.Linear(64, output_dim)
         )
 
-    def forward(self, x, t, xt):
+    def forward(self, x, t):
         # Concatenate input pixels with noise level t and positional encodings
-        xt = xt.transpose(1,3)
+        t = torch.transpose(1,3)
         pos_encoding = [torch.sin(2 * math.pi * t * (2 **-l)) for l in range(self.num_encodings)]
         pos_encoding = torch.cat(pos_encoding, dim=-1)
         x = torch.cat((xt, x, t, pos_encoding), dim=-1)
@@ -510,56 +510,21 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
 
         return timesteps, num_inference_steps - t_start
 
-    def prepare_latents(self, image, timestep, batch_size, num_images_per_prompt, dtype, device, generator=None):
-        if not isinstance(image, (torch.Tensor, PIL.Image.Image, list)):
-            raise ValueError(
-                f"`image` has to be of type `torch.Tensor`, `PIL.Image.Image` or list but is {type(image)}"
-            )
-
-        image = image.to(device=device, dtype=dtype)
-
-        batch_size = batch_size * num_images_per_prompt
+    def prepare_latents(self, batch_size, num_channels_latents, height, width, dtype, device, generator, latents=None):
+        shape = (batch_size, num_channels_latents, height // self.vae_scale_factor, width // self.vae_scale_factor)
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators."
             )
 
-        if isinstance(generator, list):
-            init_latents = [
-                self.vae.encode(image[i : i + 1]).latent_dist.sample(generator[i]) for i in range(batch_size)
-            ]
-            init_latents = torch.cat(init_latents, dim=0)
+        if latents is None:
+            latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
         else:
-            init_latents = self.vae.encode(image).latent_dist.sample(generator)
+            latents = latents.to(device)
 
-        init_latents = 0.18215 * init_latents
-
-        if batch_size > init_latents.shape[0] and batch_size % init_latents.shape[0] == 0:
-            # expand init_latents for batch_size
-            deprecation_message = (
-                f"You have passed {batch_size} text prompts (`prompt`), but only {init_latents.shape[0]} initial"
-                " images (`image`). Initial images are now duplicating to match the number of text prompts. Note"
-                " that this behavior is deprecated and will be removed in a version 1.0.0. Please make sure to update"
-                " your script to pass as many initial images as text prompts to suppress this warning."
-            )
-            deprecate("len(prompt) != len(image)", "1.0.0", deprecation_message, standard_warn=False)
-            additional_image_per_prompt = batch_size // init_latents.shape[0]
-            init_latents = torch.cat([init_latents] * additional_image_per_prompt, dim=0)
-        elif batch_size > init_latents.shape[0] and batch_size % init_latents.shape[0] != 0:
-            raise ValueError(
-                f"Cannot duplicate `image` of batch size {init_latents.shape[0]} to {batch_size} text prompts."
-            )
-        else:
-            init_latents = torch.cat([init_latents], dim=0)
-
-        shape = init_latents.shape
-        noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
-
-        # get latents
-        init_latents = self.scheduler.add_noise(init_latents, noise, timestep)
-        latents = init_latents
-
+        # scale the initial noise by the standard deviation required by the scheduler
+        latents = latents * self.scheduler.init_noise_sigma
         return latents
 
     @torch.no_grad()
@@ -567,16 +532,18 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
     def __call__(
         self,
         prompt: Union[str, List[str]],
+        height: Optional[int] = None,
+        width: Optional[int] = None,
         LGP_path: str,
         edge_guidance_scale: float,
         image: Union[torch.FloatTensor, PIL.Image.Image] = None,
-        strength: float = 0.8,
         num_inference_steps: Optional[int] = 50,
         guidance_scale: Optional[float] = 7.5,
         negative_prompt: Optional[Union[str, List[str]]] = None,
         num_images_per_prompt: Optional[int] = 1,
         eta: Optional[float] = 0.0,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+        latents: Optional[torch.FloatTensor] = None,
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
         callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
@@ -642,9 +609,13 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         message = "Please use `image` instead of `init_image`."
         init_image = deprecate("init_image", "0.13.0", message, take_from=kwargs)
         image = init_image or image
+        
+        # 0. Default height and width to unet
+        height = height or self.unet.config.sample_size * self.vae_scale_factor
+        width = width or self.unet.config.sample_size * self.vae_scale_factor
 
         # 1. Check inputs
-        self.check_inputs(prompt, strength, callback_steps)
+        self.check_inputs(prompt, height, width, callback_steps)
 
         # 2. Define call parameters
         batch_size = 1 if isinstance(prompt, str) else len(prompt)
@@ -663,27 +634,33 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         target = image.convert("L")
         target = target.filter(ImageFilter.FIND_EDGES)
         target_rgb = Image.merge('RGB', (target, target, target))
-        
-        image = preprocess(image)
         target_latent = self.img_to_latents(target_rgb)
 
         # 5. set timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
-        timesteps, num_inference_steps = self.get_timesteps(num_inference_steps, strength, device)
-        latent_timestep = timesteps[:1].repeat(batch_size * num_images_per_prompt)
+        timesteps = self.scheduler.timesteps
 
         # 6. Prepare latent variables
+        num_channels_latents = self.unet.in_channels
         latents = self.prepare_latents(
-            image, latent_timestep, batch_size, num_images_per_prompt, text_embeddings.dtype, device, generator
+            batch_size * num_images_per_prompt,
+            num_channels_latents,
+            height,
+            width,
+            text_embeddings.dtype,
+            device,
+            generator,
+            latents,
         )
 
         # 7. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
         # 8. Denoising loop
+        num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         criterion = nn.MSELoss()
         blocks = [0,1,2,3]
-        LGP = latent_guidance_predictor(output_dim=4, input_dim=7084, num_encodings=9).to(device)
+        LGP = latent_guidance_predictor(output_dim=4, input_dim=7080, num_encodings=9).to(device)
         checkpoint = torch.load(LGP_path, map_location=device)
         LGP.load_state_dict(checkpoint['model_state_dict'])
         LGP.eval()
@@ -709,7 +686,6 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
 
                 # predict the noise residual          
                 noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample       
-                noise_pred_t = noise_pred
 
                 # perform guidance
                 if do_classifier_free_guidance:
@@ -723,19 +699,17 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                 activations = [activations[0][0], activations[1][0], activations[2][0], activations[3][0], activations[4], activations[5], activations[6], activations[7]]                
                 
                 with torch.enable_grad():
-                    #target_latent = target_latent.detach().requires_grad_(requires_grad=True)
                     latents = latents.detach().requires_grad_(requires_grad=True)
-                    noise_lvl = noise_pred_t[:1].transpose(1,3)
                     features = resize_and_concatenate(activations, latents)
-                    pred_edge_map = LGP(features, noise_lvl, latents)
+                    pred_edge_map = LGP(features, latents)
                     pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64)).transpose(3, 1)              
              
                     sim = criterion(pred_edge_map, target_latent)
                     gradient = torch.autograd.grad(sim, latents)[0]                      
                 
                 # compute the previous noisy sample x_t -> x_t-1
-                latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample - gradient
-                
+                latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample 
+              
                 alpha = (torch.sqrt(criterion(latent_model_input[:1] - latents)))/(torch.linalg.vector_norm(gradient))
                 alpha = alpha * edge_guidance_scale                
                 latents = latents - alpha * gradient
