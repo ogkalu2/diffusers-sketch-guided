@@ -406,8 +406,8 @@ class VersatileDiffusionDualGuidedPipeline(DiffusionPipeline):
     @torch.no_grad()
     def __call__(
         self,
-        prompt: Union[PIL.Image.Image, List[PIL.Image.Image]],
-        image: Union[str, List[str]],
+        prompt: Union[str, List[str]],
+        image: Union[PIL.Image.Image, List[PIL.Image.Image]],
         text_to_image_strength: float = 0.5,
         height: Optional[int] = None,
         width: Optional[int] = None,
@@ -525,9 +525,10 @@ class VersatileDiffusionDualGuidedPipeline(DiffusionPipeline):
 
         # 3. Encode input prompts
         text_embeddings = self._encode_text_prompt(prompt, device, num_images_per_prompt, do_classifier_free_guidance)
-        image_embeddings = self._encode_image_prompt(image, device, num_images_per_prompt, do_classifier_free_guidance)
+        image_embeddings = [self._encode_image_prompt(image, device, num_images_per_prompt, do_classifier_free_guidance) for img in image]
+        image_embeddings = torch.cat(image_embeddings, dim=1)
         dual_prompt_embeddings = torch.cat([text_embeddings, image_embeddings], dim=1)
-        prompt_types = ("text", "image")
+        #prompt_types = ("text", "image")
 
         # 4. Prepare timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -550,7 +551,7 @@ class VersatileDiffusionDualGuidedPipeline(DiffusionPipeline):
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
         # 7. Combine the attention blocks of the image and text UNets
-        self.set_transformer_params(text_to_image_strength, prompt_types)
+        #self.set_transformer_params(text_to_image_strength, prompt_types)
 
         # 8. Denoising loop
         for i, t in enumerate(self.progress_bar(timesteps)):
