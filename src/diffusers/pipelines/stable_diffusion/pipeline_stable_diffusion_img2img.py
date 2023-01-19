@@ -162,7 +162,7 @@ class latent_guidance_predictor(nn.Module):
         t = t.transpose(1,3)
         pos_encoding = [torch.sin(2 * math.pi * t * (2 **-l)) for l in range(self.num_encodings)]
         pos_encoding = torch.cat(pos_encoding, dim=-1)
-        x = torch.cat((xt, x, t, pos_encoding), dim=-1)
+        x = torch.cat((x, t, pos_encoding), dim=-1)
         x = x.flatten(start_dim=0, end_dim=2)
         
         return self.layers(x)
