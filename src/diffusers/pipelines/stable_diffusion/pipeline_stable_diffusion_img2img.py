@@ -707,7 +707,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                     pred_edge_map = pred_edge_map.detach().requires_grad_(requires_grad=True)
              
                     sim = criterion(pred_edge_map, target_latent)
-                    gradient = torch.autograd.grad(sim, pred_edge_map)[0]                      
+                    gradient = torch.autograd.grad(sim, target_latent)[0]                      
                 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample 
