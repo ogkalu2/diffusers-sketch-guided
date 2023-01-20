@@ -631,10 +631,10 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         )
 
         # 4. Preprocess image
-        #target = image.convert("L")
-        #target = target.filter(ImageFilter.FIND_EDGES)
-        #target_rgb = Image.merge('RGB', (target, target, target))
-        target_latent = self.img_to_latents(image)
+        target = image.convert("L")
+        target = target.filter(ImageFilter.FIND_EDGES)
+        target_rgb = Image.merge('RGB', (target, target, target))
+        target_latent = self.img_to_latents(target_rgb)
 
         # 5. set timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -707,7 +707,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
                     pred_edge_map = pred_edge_map.detach().requires_grad_(requires_grad=True)
              
                     sim = criterion(pred_edge_map, target_latent)
-                    gradient = torch.autograd.grad(sim, latents)[0]                      
+                    gradient = torch.autograd.grad(sim, target_latent)[0]                      
                 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample 
