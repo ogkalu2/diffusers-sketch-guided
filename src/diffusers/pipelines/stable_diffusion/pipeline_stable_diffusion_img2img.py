@@ -631,12 +631,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
             prompt, device, num_images_per_prompt, do_classifier_free_guidance, negative_prompt
         )
 
-        # 4. Preprocess image
-        #target = image.convert("L")
-        #target = target.filter(ImageFilter.FIND_EDGES)
-        #target_rgb = Image.merge('RGB', (target, target, target))
-        #target_latent = self.img_to_latents(target_rgb)
-        
+        # 4. Preprocess edge_map        
         target = target_edge_map
         target_rgb = Image.merge('RGB', (target, target, target))
         target_latent = self.img_to_latents(target_rgb)
@@ -703,21 +698,21 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
          
                 activations = [activations[0][0], activations[1][0], activations[2][0], activations[3][0], activations[4], activations[5], activations[6], activations[7]]                
                 
-                #with torch.enable_grad():
-                    #target_latent = target_latent.detach().requires_grad_(requires_grad=True)
-                    #latents = latents.detach().requires_grad_(requires_grad=True)
-                    #features = resize_and_concatenate(activations, latents)
-                    #pred_edge_map = LGP(features, latents)
-                    #pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64)).transpose(3, 1)
-                    #pred_edge_map = pred_edge_map.detach().requires_grad_(requires_grad=True)
+                with torch.enable_grad():
+                    target_latent = target_latent.detach().requires_grad_(requires_grad=True)
+                    latents = latents.detach().requires_grad_(requires_grad=True)
+                    features = resize_and_concatenate(activations, latents)
+                    pred_edge_map = LGP(features, latents)
+                    pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64)).transpose(3, 1)
+                    pred_edge_map = pred_edge_map.detach().requires_grad_(requires_grad=True)
              
-                    #sim = criterion(pred_edge_map, target_latent)
-                    #gradient = torch.autograd.grad(sim, target_latent)[0]
+                    sim = criterion(pred_edge_map, target_latent)
+                    gradient = torch.autograd.grad(sim, target_latent)[0]
                     
-                features = resize_and_concatenate(activations, latents)
-                pred_edge_map = LGP(features, latents)
-                pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64)).transpose(3, 1)
-                gradient = grad(pred_edge_map, target_latent)
+                #features = resize_and_concatenate(activations, latents)
+                #pred_edge_map = LGP(features, latents)
+                #pred_edge_map = pred_edge_map.unflatten(0, (1, 64, 64)).transpose(3, 1)
+                #gradient = grad(pred_edge_map, target_latent)
                 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample 
