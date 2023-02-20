@@ -537,6 +537,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         height: Optional[int] = None,
         width: Optional[int] = None,
         image: Union[torch.FloatTensor, PIL.Image.Image] = None,
+        target_edge_map: Union[torch.FloatTensor, PIL.Image.Image] = None,
         num_inference_steps: Optional[int] = 50,
         guidance_scale: Optional[float] = 7.5,
         negative_prompt: Optional[Union[str, List[str]]] = None,
@@ -631,8 +632,12 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         )
 
         # 4. Preprocess image
-        target = image.convert("L")
-        target = target.filter(ImageFilter.FIND_EDGES)
+        #target = image.convert("L")
+        #target = target.filter(ImageFilter.FIND_EDGES)
+        #target_rgb = Image.merge('RGB', (target, target, target))
+        #target_latent = self.img_to_latents(target_rgb)
+        
+        target = target_edge_map
         target_rgb = Image.merge('RGB', (target, target, target))
         target_latent = self.img_to_latents(target_rgb)
 
